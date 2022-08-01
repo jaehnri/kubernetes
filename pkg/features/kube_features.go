@@ -449,6 +449,7 @@ const (
 	// owner: @andrewsykim @adisky
 	// alpha: v1.20
 	// beta: v1.24
+	// ga: v1.25
 	//
 	// Enable kubelet exec plugins for image pull credentials.
 	KubeletCredentialProviders featuregate.Feature = "KubeletCredentialProviders"
@@ -911,7 +912,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	JobTrackingWithFinalizers: {Default: true, PreRelease: featuregate.Beta},
 
-	KubeletCredentialProviders: {Default: true, PreRelease: featuregate.Beta},
+	KubeletCredentialProviders: {Default: true, PreRelease: featuregate.GA},
 
 	KubeletInUserNamespace: {Default: false, PreRelease: featuregate.Alpha},
 
