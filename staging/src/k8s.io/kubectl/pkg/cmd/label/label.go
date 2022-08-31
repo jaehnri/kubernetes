@@ -18,7 +18,8 @@ package label
 
 import (
 	"fmt"
-	"reflect"
+	"github.com/google/go-cmp/cmp"
+	"io"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -57,6 +58,7 @@ type LabelOptions struct {
 	RecordFlags *genericclioptions.RecordFlags
 
 	PrintFlags *genericclioptions.PrintFlags
+	PrintObj   func(string) printers.ResourcePrinterFunc
 	ToPrinter  func(string) (printers.ResourcePrinter, error)
 
 	// Common user flags
@@ -124,7 +126,7 @@ func NewLabelOptions(ioStreams genericclioptions.IOStreams) *LabelOptions {
 		RecordFlags: genericclioptions.NewRecordFlags(),
 		Recorder:    genericclioptions.NoopRecorder{},
 
-		PrintFlags: genericclioptions.NewPrintFlags("labeled").WithTypeSetter(scheme.Scheme),
+		PrintFlags: genericclioptions.NewPrintFlags(MsgLabeled).WithTypeSetter(scheme.Scheme),
 
 		IOStreams: ioStreams,
 	}
@@ -187,11 +189,15 @@ func (o *LabelOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []st
 	}
 	o.dryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, f.OpenAPIGetter(), resource.QueryParamDryRun)
 
-	o.ToPrinter = func(operation string) (printers.ResourcePrinter, error) {
-		o.PrintFlags.NamePrintFlags.Operation = operation
-		// PrintFlagsWithDryRunStrategy must be done after NamePrintFlags.Operation is set
-		cmdutil.PrintFlagsWithDryRunStrategy(o.PrintFlags, o.dryRunStrategy)
-		return o.PrintFlags.ToPrinter()
+	printer, err := o.PrintFlags.ToPrinter()
+	if err != nil {
+		return err
+	}
+	o.PrintObj = func(operation string) printers.ResourcePrinterFunc {
+		return func(obj runtime.Object, out io.Writer) error {
+			o.PrintFlags.NamePrintFlags.Operation = operation
+			return printer.PrintObj(obj, out)
+		}
 	}
 
 	resources, labelArgs, err := cmdutil.GetResourcesAndPairs(args, "label")
@@ -388,17 +394,13 @@ func (o *LabelOptions) RunLabel() error {
 			return nil
 		}
 
-		printer, err := o.ToPrinter(dataChangeMsg)
-		if err != nil {
-			return err
-		}
-		return printer.PrintObj(info.Object, o.Out)
+		return o.PrintObj(dataChangeMsg).PrintObj(info.Object, o.Out)
 	})
 }
 
 func updateDataChangeMsg(oldObj []byte, newObj []byte, overwrite bool) string {
 	msg := MsgNotLabeled
-	if !reflect.DeepEqual(oldObj, newObj) {
+	if !cmp.Equal(oldObj, newObj) {
 		msg = MsgLabeled
 		if !overwrite && len(newObj) < len(oldObj) {
 			msg = MsgUnLabeled
