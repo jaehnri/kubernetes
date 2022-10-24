@@ -30,7 +30,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
-
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -975,9 +974,6 @@ func TestMounterSetUpWithFSGroup(t *testing.T) {
 		}
 
 		csiMounter := mounter.(*csiMountMgr)
-		if tc.driverFSGroupPolicy {
-			csiMounter.fsGroupPolicy = tc.supportMode
-		}
 		csiMounter.csiClient = setupClientWithVolumeMountGroup(t, true /* stageUnstageSet */, tc.driverSupportsVolumeMountGroup)
 
 		attachID := getAttachmentName(csiMounter.volumeID, string(csiMounter.driverName), string(plug.host.GetNodeName()))
@@ -1225,7 +1221,6 @@ func Test_csiMountMgr_supportsFSGroup(t *testing.T) {
 		plugin              *csiPlugin
 		driverName          csiDriverName
 		volumeLifecycleMode storage.VolumeLifecycleMode
-		fsGroupPolicy       storage.FSGroupPolicy
 		volumeID            string
 		specVolumeID        string
 		readOnly            bool
@@ -1351,7 +1346,6 @@ func Test_csiMountMgr_supportsFSGroup(t *testing.T) {
 				plugin:              tt.fields.plugin,
 				driverName:          tt.fields.driverName,
 				volumeLifecycleMode: tt.fields.volumeLifecycleMode,
-				fsGroupPolicy:       tt.fields.fsGroupPolicy,
 				volumeID:            tt.fields.volumeID,
 				specVolumeID:        tt.fields.specVolumeID,
 				readOnly:            tt.fields.readOnly,
@@ -1367,5 +1361,66 @@ func Test_csiMountMgr_supportsFSGroup(t *testing.T) {
 				t.Errorf("supportsFSGroup() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMounterGetFSGroupPolicy(t *testing.T) {
+	defaultPolicy := storage.ReadWriteOnceWithFSTypeFSGroupPolicy
+	testCases := []struct {
+		name                  string
+		defined               bool
+		expectedFSGroupPolicy storage.FSGroupPolicy
+	}{
+		{
+			name:                  "no FSGroupPolicy defined, expect default",
+			defined:               false,
+			expectedFSGroupPolicy: storage.ReadWriteOnceWithFSTypeFSGroupPolicy,
+		},
+		{
+			name:                  "File FSGroupPolicy defined, expect File",
+			defined:               true,
+			expectedFSGroupPolicy: storage.FileFSGroupPolicy,
+		},
+		{
+			name:                  "None FSGroupPolicy defined, expected None",
+			defined:               true,
+			expectedFSGroupPolicy: storage.NoneFSGroupPolicy,
+		},
+	}
+	for _, tc := range testCases {
+		t.Logf("testing: %s", tc.name)
+		// Define the driver and set the FSGroupPolicy
+		driver := getTestCSIDriver(testDriver, nil, nil, nil)
+		if tc.defined {
+			driver.Spec.FSGroupPolicy = &tc.expectedFSGroupPolicy
+		} else {
+			driver.Spec.FSGroupPolicy = &defaultPolicy
+		}
+
+		// Create the client and register the resources
+		fakeClient := fakeclient.NewSimpleClientset(driver)
+		plug, tmpDir := newTestPlugin(t, fakeClient)
+		defer os.RemoveAll(tmpDir)
+		registerFakePlugin(testDriver, "endpoint", []string{"1.3.0"}, t)
+
+		mounter, err := plug.NewMounter(
+			volume.NewSpecFromPersistentVolume(makeTestPV("test.vol.id", 20, testDriver, "testvol-handle1"), true),
+			&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: "1", Namespace: testns}},
+			volume.VolumeOptions{},
+		)
+		if err != nil {
+			t.Fatalf("Error creating a new mounter: %s", err)
+		}
+
+		csiMounter := mounter.(*csiMountMgr)
+
+		// Check to see if we can obtain the CSIDriver, along with examining its FSGroupPolicy
+		fsGroup, err := csiMounter.getFSGroupPolicy()
+		if err != nil {
+			t.Fatalf("Error attempting to obtain FSGroupPolicy: %v", err)
+		}
+		if fsGroup != *driver.Spec.FSGroupPolicy {
+			t.Fatalf("FSGroupPolicy doesn't match expected value: %v, %v", fsGroup, tc.expectedFSGroupPolicy)
+		}
 	}
 }
