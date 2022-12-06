@@ -141,7 +141,6 @@ type LabelOptions struct {
 	enforceNamespace             bool
 	builder                      *resource.Builder
 	unstructuredClientForMapping func(mapping *meta.RESTMapping) (resource.RESTClient, error)
-	dryRunVerifier               *resource.QueryParamVerifier
 
 	// Common shared fields
 	genericclioptions.IOStreams
@@ -213,11 +212,6 @@ func (f *LabelFlags) ToOptions(cmd *cobra.Command, args []string) (*LabelOptions
 	if err != nil {
 		return nil, err
 	}
-	dynamicClient, err := f.Factory.DynamicClient()
-	if err != nil {
-		return nil, err
-	}
-	dryRunVerifier := resource.NewQueryParamVerifier(dynamicClient, f.Factory.OpenAPIGetter(), resource.QueryParamDryRun)
 
 	toPrinter := func(operation string) (printers.ResourcePrinter, error) {
 		f.PrintFlags.NamePrintFlags.Operation = operation
@@ -275,7 +269,6 @@ func (f *LabelFlags) ToOptions(cmd *cobra.Command, args []string) (*LabelOptions
 		enforceNamespace:             enforceNamespace,
 		builder:                      builder,
 		unstructuredClientForMapping: unstructuredClientForMapping,
-		dryRunVerifier:               dryRunVerifier,
 
 		IOStreams: f.IOStreams,
 	}, nil
@@ -406,11 +399,6 @@ func (o *LabelOptions) RunLabel() error {
 			}
 
 			mapping := info.ResourceMapping()
-			if o.dryRunStrategy == cmdutil.DryRunServer {
-				if err := o.dryRunVerifier.HasSupport(mapping.GroupVersionKind); err != nil {
-					return err
-				}
-			}
 			client, err := o.unstructuredClientForMapping(mapping)
 			if err != nil {
 				return err
